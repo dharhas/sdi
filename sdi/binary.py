@@ -1,13 +1,13 @@
-from datetime import datetime, date
 import itertools
 import struct
-from StringIO import StringIO
 import warnings
+from datetime import date, datetime
+from io import BytesIO
 
 import numpy as np
 
 
-def read(filepath, separate=True, file_format='bin'):
+def read(filepath, separate=True, file_format="bin"):
     dataset = Dataset(filepath)
     return dataset.as_dict(separate=separate, file_format=file_format)
 
@@ -17,7 +17,7 @@ class Dataset(object):
         self.filepath = filepath
         self.parsed = False
 
-    def as_dict(self, separate=True, file_format='bin'):
+    def as_dict(self, separate=True, file_format="bin"):
         """Returns the SDI data as a dict. Data is collected and stored in the
         binary file as a sequence of traces, cycling between sampling
         frequencies. Each vertical column of intensity data is a trace and has
@@ -220,24 +220,27 @@ class Dataset(object):
             self.parse(file_format=file_format)
 
         d = {
-            'date': self.date,
-            'filepath': self.filepath,
-            'file_version': self.version,
-            'survey_line_number': self.survey_line_number,
+            "date": self.date,
+            "filepath": self.filepath,
+            "file_version": self.version,
+            "survey_line_number": self.survey_line_number,
         }
 
-        if file_format == 'bss':
-            d.update({
-                'start_datetime': self.start_datetime,
-                'end_datetime': self.end_datetime,
-                'depth_r1': self.trace_metadata.pop('depth_r1') + self.trace_metadata['draft']
-            })
+        if file_format == "bss":
+            d.update(
+                {
+                    "start_datetime": self.start_datetime,
+                    "end_datetime": self.end_datetime,
+                    "depth_r1": self.trace_metadata.pop("depth_r1")
+                    + self.trace_metadata["draft"],
+                }
+            )
 
         if separate:
-            d['frequencies'] = self.frequencies
+            d["frequencies"] = self.frequencies
         else:
-            d['intensity'] = self.intensity_image
-            for key, array in self.trace_metadata.iteritems():
+            d["intensity"] = self.intensity_image
+            for key, array in self.trace_metadata.items():
                 d[key] = array
         return d
 
@@ -247,12 +250,12 @@ class Dataset(object):
         """
         frequencies = []
 
-        transducers = np.unique(self.trace_metadata['transducer'])
+        transducers = np.unique(self.trace_metadata["transducer"])
         for transducer in transducers:
             freq_dict = {}
-            freq_mask = np.where(self.trace_metadata['transducer'] == transducer)
+            freq_mask = np.where(self.trace_metadata["transducer"] == transducer)
 
-            unique_kHzs = np.unique(self.trace_metadata['kHz'][freq_mask])
+            unique_kHzs = np.unique(self.trace_metadata["kHz"][freq_mask])
             if len(unique_kHzs) > 1:
                 raise RuntimeError(
                     "The file has been corrupted or there is a bug in this "
@@ -262,14 +265,14 @@ class Dataset(object):
             else:
                 khz = unique_kHzs[0]
 
-            for key, array in self.trace_metadata.iteritems():
+            for key, array in self.trace_metadata.items():
                 freq_dict[key] = array[freq_mask]
 
-            freq_dict['intensity'] = self.intensity_image[freq_mask]
-            freq_dict['kHz'] = khz
+            freq_dict["intensity"] = self.intensity_image[freq_mask]
+            freq_dict["kHz"] = khz
             frequencies.append(freq_dict)
 
-        return sorted(frequencies, key=lambda d: d['kHz'])
+        return sorted(frequencies, key=lambda d: d["kHz"])
 
     def convert_to_meters_array(self, units):
         """Given an array of unit integers, returns an array of conversion
@@ -278,7 +281,7 @@ class Dataset(object):
         """
         # Based on this excerpt from the spec:
         #   6   1 Units          Byte                 0 = feet, 1 = meters, 2 = fathoms.  Fields
-                                                       #that use Units are noted
+        # that use Units are noted
         #   7   1 Spdosunits     Byte                 0 = feet, 1 = meters. Used by Spdos only
 
         units_factors = {
@@ -286,16 +289,18 @@ class Dataset(object):
             1: 1.0,  # meters to meters
             2: 1.8288,  # fathoms to meters
         }
-        convert_to_meters = np.zeros(len(units), dtype=np.float)
+        convert_to_meters = np.zeros(len(units), dtype=float)
 
-        for unit_value, conversion_factor in units_factors.iteritems():
+        for unit_value, conversion_factor in units_factors.items():
             convert_to_meters[units == unit_value] = conversion_factor
 
-        is_zero = (convert_to_meters == 0)
+        is_zero = convert_to_meters == 0
         if np.any(is_zero):
             if len(convert_to_meters[is_zero]) < 5:
                 convert_to_meters[is_zero] = convert_to_meters[~is_zero][0]
-                warnings.warn("Encountered a few (< 5) unsupported units in units array, replacing with units from first valid field in array")
+                warnings.warn(
+                    "Encountered a few (< 5) unsupported units in units array, replacing with units from first valid field in array"
+                )
             else:
                 raise NotImplementedError("Encountered unsupported units.")
 
@@ -343,30 +348,28 @@ class Dataset(object):
 
         return good_x, good_y
 
-    def parse(self, file_format='bin'):
+    def parse(self, file_format="bin"):
         """Parse the entire file and initialize attributes"""
-        with open(self.filepath, 'rb') as f:
+        with open(self.filepath, "rb") as f:
             data = f.read()
 
-        fid = StringIO(data)
+        fid = BytesIO(data)
         data_length = len(data)
 
-        if file_format == 'bin':
+        if file_format == "bin":
             header = self.parse_file_header(fid)
-            self.version = header['version']
-            self.survey_line_number = header['filename']
-            header = self.parse_file_header(fid)
-            self.resolution_cm = header['resolution_cm']
-            self.date = datetime.strptime(
-                self.survey_line_number[:6], '%y%m%d').date()
+            self.version = header["version"]
+            self.survey_line_number = header["filename"]
+            # header = self.parse_file_header(fid)
+            self.resolution_cm = header["resolution_cm"]
+            self.date = datetime.strptime(self.survey_line_number[:6], "%y%m%d").date()
             self.parse_records(fid, data_length)
-        elif file_format == 'bss':
+        elif file_format == "bss":
             header = self.parse_bss_file_header(fid)
             self.file_header = header
-            self.version = header['version']
-            self.survey_line_number = header['filename']
-            self.date = datetime.strptime(
-                self.survey_line_number[:6], '%y%m%d').date()            
+            self.version = header["version"]
+            self.survey_line_number = header["filename"]
+            self.date = datetime.strptime(self.survey_line_number[:6], "%y%m%d").date()
             self.parse_bss_records()
 
         self.frequencies = self.assemble_frequencies()
@@ -390,18 +393,23 @@ class Dataset(object):
         """
         f.seek(0)
 
-        filename, cr, lf, version_byte, resolution_cm = struct.unpack('<8s2cBB', f.read(12))
+        filename, cr, lf, version_byte, resolution_cm = struct.unpack(
+            "<8s2cBB", f.read(12)
+        )
         major_version = version_byte >> 4
         minor_version = version_byte & 0xF
 
-        version = '%s.%s' % (major_version, minor_version)
-        if version <= '3.2':
-            raise NotImplementedError('Reading of file formats <= 3.2 Not Supported, File Version=' + str(version))
+        version = "%s.%s" % (major_version, minor_version)
+        if version <= "3.2":
+            raise NotImplementedError(
+                "Reading of file formats <= 3.2 Not Supported, File Version="
+                + str(version)
+            )
 
         return {
-            'filename': filename,
-            'version': version,
-            'resolution_cm': resolution_cm,
+            "filename": filename.decode("latin-1"),
+            "version": version,
+            "resolution_cm": resolution_cm,
         }
 
     def parse_bss_file_header(self, f):
@@ -416,88 +424,86 @@ class Dataset(object):
 
         f.seek(66)
 
-        filename = struct.unpack('<64s', f.read(64))[0].decode('utf16')
-        file_version = struct.unpack('<H', f.read(2))[0]
-        file_number = struct.unpack('<H', f.read(2))[0]
-        
+        filename = struct.unpack("<64s", f.read(64))[0].decode("utf16")
+        file_version = struct.unpack("<H", f.read(2))[0]
+        file_number = struct.unpack("<H", f.read(2))[0]
+
         f.seek(146)
-        self.spdos = struct.unpack('<d', f.read(8))[0]
+        self.spdos = struct.unpack("<d", f.read(8))[0]
 
         f.seek(158)
-        self.start_datetime = struct.unpack('<d', f.read(8))[0]
+        self.start_datetime = struct.unpack("<d", f.read(8))[0]
         f.seek(360)
-        self.end_datetime = struct.unpack('<d', f.read(8))[0]
+        self.end_datetime = struct.unpack("<d", f.read(8))[0]
         f.seek(170)
-        self.units = struct.unpack('<B', f.read(1))[0]
+        self.units = struct.unpack("<B", f.read(1))[0]
 
         return {
-            'filename': filename,
-            'version': file_version,
-            'file_number': file_number,
-            'date': date.today(),
+            "filename": filename,
+            "version": file_version,
+            "file_number": file_number,
+            "date": date.today(),
         }
 
     def parse_records(self, fid, data_length):
         pre_structs = [
-            ('offset', 'H', np.uint16),
-            ('trace_num', 'l', np.int32),
-            ('units', 'B', np.uint8),
-            ('spdos_units', 'B', np.uint8),
-            ('spdos', 'h', np.int16),
-            ('min_window10', 'h', np.int16),
-            ('max_window10', 'h', np.int16),
-            ('draft100', 'h', np.int16),
-            ('tide100', 'h', np.int16),
-            ('heave_cm', 'h', np.int16),
-            ('display_range', 'h', np.int16),
-            ('depth_r1', 'f', np.float32),
-            ('min_pnt_r1', 'f', np.float32),
-            ('num_pnt_r1', 'f', np.float32),
-            ('blanking_pnt', 'h', np.int16),
-            ('depth_pnt','h', np.int16),
-            ('range_pnt','h', np.int16),
-            ('num_pnts','h', np.int16),
-            ('clock', 'l', np.int32),
-            ('hour', 'B', np.uint8),
-            ('minute', 'B', np.uint8),
-            ('second', 'B', np.uint8),
-            ('centisecond', 'B', np.uint8),
-            ('rate', 'l', np.int32),
-            ('kHz', 'f', np.float32),
-            ('event_len', 'B', np.uint8),
+            ("offset", "H", np.uint16),
+            ("trace_num", "l", np.int32),
+            ("units", "B", np.uint8),
+            ("spdos_units", "B", np.uint8),
+            ("spdos", "h", np.int16),
+            ("min_window10", "h", np.int16),
+            ("max_window10", "h", np.int16),
+            ("draft100", "h", np.int16),
+            ("tide100", "h", np.int16),
+            ("heave_cm", "h", np.int16),
+            ("display_range", "h", np.int16),
+            ("depth_r1", "f", np.float32),
+            ("min_pnt_r1", "f", np.float32),
+            ("num_pnt_r1", "f", np.float32),
+            ("blanking_pnt", "h", np.int16),
+            ("depth_pnt", "h", np.int16),
+            ("range_pnt", "h", np.int16),
+            ("num_pnts", "h", np.int16),
+            ("clock", "l", np.int32),
+            ("hour", "B", np.uint8),
+            ("minute", "B", np.uint8),
+            ("second", "B", np.uint8),
+            ("centisecond", "B", np.uint8),
+            ("rate", "l", np.int32),
+            ("kHz", "f", np.float32),
+            ("event_len", "B", np.uint8),
         ]
-        event_struct = [('event', None, None)]
+        event_struct = [("event", None, None)]
         post_structs = [
-            ('longitude', 'd', np.float64),
-            ('latitude', 'd', np.float64),
-            ('transducer', 'B', np.uint8),
-            ('options', 'B', np.uint8),
-            ('data_offset', 'B', np.uint8),
+            ("longitude", "d", np.float64),
+            ("latitude", "d", np.float64),
+            ("transducer", "B", np.uint8),
+            ("options", "B", np.uint8),
+            ("data_offset", "B", np.uint8),
         ]
-        if self.version >= '3.3':
-            post_structs.append(('easting', 'd', np.float64))
-            post_structs.append(('northing', 'd', np.float64))
-        if self.version >= '4.0':
-            post_structs.append(('cycles', 'B', np.uint8))
-            post_structs.append(('volts', 'B', np.uint8))
-            post_structs.append(('power', 'B', np.uint8))
-            post_structs.append(('gain', 'B', np.uint8))
-            post_structs.append(('previous_offset', 'H', np.int16))
-        if self.version >= '4.2':
-            post_structs.append(('antenna_e1', 'f', np.float32))
-            post_structs.append(('antenna_ht', 'f', np.float32))
-            post_structs.append(('draft', 'f', np.float32))
-            post_structs.append(('tide', 'f', np.float32))
-        if self.version >= '4.3':
-            post_structs.append(('gps_mode', 'b', np.int16))
-            post_structs.append(('hdop', 'f', np.float32))
+        if self.version >= "3.3":
+            post_structs.append(("easting", "d", np.float64))
+            post_structs.append(("northing", "d", np.float64))
+        if self.version >= "4.0":
+            post_structs.append(("cycles", "B", np.uint8))
+            post_structs.append(("volts", "B", np.uint8))
+            post_structs.append(("power", "B", np.uint8))
+            post_structs.append(("gain", "B", np.uint8))
+            post_structs.append(("previous_offset", "H", np.int16))
+        if self.version >= "4.2":
+            post_structs.append(("antenna_e1", "f", np.float32))
+            post_structs.append(("antenna_ht", "f", np.float32))
+            post_structs.append(("draft", "f", np.float32))
+            post_structs.append(("tide", "f", np.float32))
+        if self.version >= "4.3":
+            post_structs.append(("gps_mode", "b", np.int16))
+            post_structs.append(("hdop", "f", np.float32))
 
         all_structs = pre_structs + event_struct + post_structs
 
         # intitialize dict of trace elements
-        raw_trace = dict([
-            [name, []] for name, fmt, dtype in all_structs
-        ])
+        raw_trace = dict([[name, []] for name, fmt, dtype in all_structs])
 
         trace_intensities = []
 
@@ -514,89 +520,89 @@ class Dataset(object):
         # post-event
         while npos < data_length:
             pre_record = struct.unpack(pre_fmt, fid.read(pre_size))
-            pre_dict = dict(zip(pre_names, pre_record))
+            pre_dict = dict(list(zip(pre_names, pre_record)))
 
-            size = pre_dict['event_len']
+            size = pre_dict["event_len"]
             if size > 0:
-                event = struct.unpack('<' + str(size) + 's', fid.read(size))[0]
+                event = struct.unpack("<" + str(size) + "s", fid.read(size))[0]
             else:
-                event = ''
-            raw_trace['event'].append(event)
+                event = ""
+            raw_trace["event"].append(event)
 
             post_record = struct.unpack(post_fmt, fid.read(post_size))
-            post_dict = dict(zip(post_names, post_record))
+            post_dict = dict(list(zip(post_names, post_record)))
 
-            for key, value in itertools.chain(pre_dict.iteritems(), post_dict.iteritems()):
+            for key, value in itertools.chain(
+                iter(pre_dict.items()), iter(post_dict.items())
+            ):
                 raw_trace[key].append(value)
 
-            fid.seek(npos + pre_dict['offset'] + 2)
+            fid.seek(npos + pre_dict["offset"] + 2)
 
-            size = pre_dict['num_pnts']
-            intensity = struct.unpack('<' + str(size) + 'H', fid.read(size * 2))
+            size = pre_dict["num_pnts"]
+            intensity = struct.unpack("<" + str(size) + "H", fid.read(size * 2))
             trace_intensities.append(intensity)
             npos = int(fid.tell())
 
+        self.raw_trace = raw_trace
         self.intensities = trace_intensities
         self.trace_metadata = self.process_raw_trace(raw_trace, all_structs)
         self.intensity_image = self._normalize_scale(_fill_nans(trace_intensities))
 
     def parse_bss_records(self):
-        with open(self.filepath, 'rb') as f:
+        with open(self.filepath, "rb") as f:
             data = f.read()
 
-        fid = StringIO(data)
+        fid = BytesIO(data)
         data_length = len(data)
         self.version = 1000
 
         rec_structs = [
-            ('bss_size', 'H', np.uint32),
-            ('prev_record_size', 'L', np.uint32),
-            ('num_pnts', 'L', np.uint32),
-            ('time_tag', 'd', np.float32),
-            ('trace_num', 'L', np.uint32),
-            ('rate', 'L', np.uint32),
-            ('transducer', 'B', np.uint8),
-            ('bipolar', '?', np.bool_),
-            ('sats', 'b', np.int8),
-            ('hpr_status', 'B', np.uint8),
-            ('heave', 'f', np.float32),
-            ('pitch', 'f', np.float32),
-            ('roll', 'f', np.float32),
-            ('heading', 'f', np.float32),
-            ('course', 'f', np.float32),
-            ('kHz', 'f', np.float32),
-            ('draft', 'f', np.float32),
-            ('tide', 'f', np.float32),
-            ('antenna_el', 'f', np.float32),
-            ('blanking', 'f', np.float32),
-            ('window_min', 'f', np.float32),
-            ('window_max', 'f', np.float32),
-            ('xd_range', 'f', np.float32),
-            ('depth_r1', 'f', np.float32),
-            ('depth_r2', 'f', np.float32),
-            ('depth_r3', 'f', np.float32),
-            ('depth_r4', 'f', np.float32),
-            ('depth_r5', 'f', np.float32),
-            ('volts', 'f', np.float32),
-            ('longitude', 'd', np.float32),
-            ('latitude', 'd', np.float32),
-            ('x', 'd', np.float32),
-            ('y', 'd', np.float32),
-            ('hdop', 'f', np.float32),
-            ('cycles', 'b', np.int8),
-            ('power', 'b', np.int8),
-            ('gain', 'b', np.int8),
-            ('gps_mode', 'b', np.int8),
-            ('comment', '64s', np.string_),
-            ('select', 'B', np.uint8),
-            ('channel', 'B', np.uint8),
-
+            ("bss_size", "H", np.uint32),
+            ("prev_record_size", "L", np.uint32),
+            ("num_pnts", "L", np.uint32),
+            ("time_tag", "d", np.float32),
+            ("trace_num", "L", np.uint32),
+            ("rate", "L", np.uint32),
+            ("transducer", "B", np.uint8),
+            ("bipolar", "?", np.bool_),
+            ("sats", "b", np.int8),
+            ("hpr_status", "B", np.uint8),
+            ("heave", "f", np.float32),
+            ("pitch", "f", np.float32),
+            ("roll", "f", np.float32),
+            ("heading", "f", np.float32),
+            ("course", "f", np.float32),
+            ("kHz", "f", np.float32),
+            ("draft", "f", np.float32),
+            ("tide", "f", np.float32),
+            ("antenna_el", "f", np.float32),
+            ("blanking", "f", np.float32),
+            ("window_min", "f", np.float32),
+            ("window_max", "f", np.float32),
+            ("xd_range", "f", np.float32),
+            ("depth_r1", "f", np.float32),
+            ("depth_r2", "f", np.float32),
+            ("depth_r3", "f", np.float32),
+            ("depth_r4", "f", np.float32),
+            ("depth_r5", "f", np.float32),
+            ("volts", "f", np.float32),
+            ("longitude", "d", np.float32),
+            ("latitude", "d", np.float32),
+            ("x", "d", np.float32),
+            ("y", "d", np.float32),
+            ("hdop", "f", np.float32),
+            ("cycles", "b", np.int8),
+            ("power", "b", np.int8),
+            ("gain", "b", np.int8),
+            ("gps_mode", "b", np.int8),
+            ("comment", "64s", np.string_),
+            ("select", "B", np.uint8),
+            ("channel", "B", np.uint8),
         ]
 
         # intitialize dict of trace elements
-        raw_trace = dict([
-            [name, []] for name, fmt, dtype in rec_structs
-        ])
+        raw_trace = dict([[name, []] for name, fmt, dtype in rec_structs])
 
         trace_intensities = []
 
@@ -605,28 +611,29 @@ class Dataset(object):
         fid.seek(npos)
         while npos < data_length:
             record = struct.unpack(fmt, fid.read(size))
-            record_dict = dict(zip(names, record))
-            for key, value in record_dict.iteritems():
+            record_dict = dict(list(zip(names, record)))
+            for key, value in record_dict.items():
                 raw_trace[key].append(value)
 
             fid.seek(int(fid.tell()) + 6)
 
-            data_size = record_dict['num_pnts']
+            data_size = record_dict["num_pnts"]
             intensity = struct.unpack(
-                '<' + str(data_size) + 'h', fid.read(data_size * 2))
+                "<" + str(data_size) + "h", fid.read(data_size * 2)
+            )
             trace_intensities.append(intensity)
             npos = int(fid.tell())
             self.raw_trace = raw_trace
             self.intensity = intensity
 
         self.trace_metadata = self.process_raw_trace(
-            raw_trace, rec_structs, file_format='bss')
+            raw_trace, rec_structs, file_format="bss"
+        )
         self.intensities = trace_intensities
         self.raw_trace = raw_trace
-        self.intensity_image = self._normalize_scale(
-            _fill_nans(trace_intensities))
+        self.intensity_image = self._normalize_scale(_fill_nans(trace_intensities))
 
-    def process_raw_trace(self, raw_trace, all_structs, file_format='bin'):
+    def process_raw_trace(self, raw_trace, all_structs, file_format="bin"):
         """Clean up raw trace data - convert lists to appropriately typed
         np.arrays of uniform units (meters for distance values)
         """
@@ -641,72 +648,75 @@ class Dataset(object):
         # some keys are depreciated and overwritten in recent versions of format
         # 'draft100' and 'tide100' for example are ignored it draft and tide are
         # present
-        units = processed.get('units', 0)
+        units = processed.get("units", 0)
         if np.any(units > 2):
             raise NotImplementedError(
-                'This sdi file contains unsupported units.',
+                "This sdi file contains unsupported units.",
             )
 
-        if file_format == 'bin':
+        if file_format == "bin":
             convert_to_meters = self.convert_to_meters_array(units)
             keys_to_convert = [
-                'min_window',
-                'max_window',
-                'display_range',
+                "min_window",
+                "max_window",
+                "display_range",
             ]
 
-            for raw_key in ['min_window10', 'max_window10']:
+            for raw_key in ["min_window10", "max_window10"]:
                 array = processed.pop(raw_key)
                 new_key = raw_key[:-2]
-                processed[new_key] = array / 10.
+                processed[new_key] = array / 10.0
 
-            for raw_key in ['draft100', 'tide100']:
+            for raw_key in ["draft100", "tide100"]:
                 array = processed.pop(raw_key)
                 new_key = raw_key[:-3]
-                if new_key not in raw_trace.keys():
+                if new_key not in list(raw_trace.keys()):
                     keys_to_convert.append(new_key)
-                    processed[new_key] = array / 100.
+                    processed[new_key] = array / 100.0
 
             for key in keys_to_convert:
                 processed[key] = processed[key] * convert_to_meters
 
             # convert heave to meters
-            heave_cm = processed.pop('heave_cm')
-            processed['heave'] = heave_cm * 100.0
+            heave_cm = processed.pop("heave_cm")
+            processed["heave"] = heave_cm * 100.0
 
             # convert speed of sound to meters
-            convert_spdos = self.convert_to_meters_array(processed['spdos_units'])
-            processed['spdos'] = processed['spdos'] * convert_spdos
+            convert_spdos = self.convert_to_meters_array(processed["spdos_units"])
+            processed["spdos"] = processed["spdos"] * convert_spdos
 
             # replace centiseconds with microseconds
-            processed['microsecond'] = processed['centisecond'].astype(np.uint32) * 10000
-            processed.pop('centisecond')
+            processed["microsecond"] = (
+                processed["centisecond"].astype(np.uint32) * 10000
+            )
+            processed.pop("centisecond")
 
-            x_col = 'easting'
-            y_col = 'northing'
+            x_col = "easting"
+            y_col = "northing"
         else:
-            processed['spdos'] = np.ones_like(processed['longitude']) * self.spdos
-            x_col = 'x'
-            y_col = 'y'
+            processed["spdos"] = np.ones_like(processed["longitude"]) * self.spdos
+            x_col = "x"
+            y_col = "y"
         # calculate pixel resolution
-        processed['pixel_resolution'] = (processed['spdos'] * 1.0) / (2 * processed['rate'])
+        processed["pixel_resolution"] = (processed["spdos"] * 1.0) / (
+            2 * processed["rate"]
+        )
 
-        for x_key, y_key in [('longitude', 'latitude'), (x_col, y_col)]:
+        for x_key, y_key in [("longitude", "latitude"), (x_col, y_col)]:
             if x_key in processed and y_key in processed:
                 # filter out bad values
-                x, y = self.filter_x_and_y(
-                    processed[x_key], processed[y_key])
-                if x_key == 'x':
-                    x_key = 'easting'
-                if y_key == 'y':
-                    y_key = 'northing'
+                x, y = self.filter_x_and_y(processed[x_key], processed[y_key])
+                if x_key == "x":
+                    x_key = "easting"
+                if y_key == "y":
+                    y_key = "northing"
 
                 processed[x_key] = x
                 processed[y_key] = y
 
                 # interpolate values
-                processed['interpolated_' + x_key] = _interpolate_repeats(x)
-                processed['interpolated_' + y_key] = _interpolate_repeats(y)
+                processed["interpolated_" + x_key] = _interpolate_repeats(x)
+                processed["interpolated_" + y_key] = _interpolate_repeats(y)
 
         return processed
 
@@ -741,13 +751,17 @@ class Dataset(object):
                 end;
             end;
         """
-        if (self.version >= '5.0' or self.version == 1000):
-            return np.abs(intensity_image + np.float(32768))/np.float64(65535)
+        if self.version >= "5.0" or self.version == 1000:
+            return np.abs(intensity_image + np.float64(32768)) / np.float64(65535)
         else:
-            index_200khz = self.raw_trace['transducer']==1
+            index_200khz = self.raw_trace["transducer"] == 1
             scaled_image = np.zeros_like(intensity_image)
-            scaled_image[index_200khz,:] = intensity_image[index_200khz,:]/np.float64(65535)
-            scaled_image[~index_200khz,:] = np.abs(intensity_image[~index_200khz,:] - np.float64(32768))/np.float64(32768)
+            scaled_image[index_200khz, :] = intensity_image[
+                index_200khz, :
+            ] / np.float64(65535)
+            scaled_image[~index_200khz, :] = np.abs(
+                intensity_image[~index_200khz, :] - np.float64(32768)
+            ) / np.float64(32768)
             return scaled_image
 
     def _split_struct_list(self, struct_list):
@@ -758,7 +772,7 @@ class Dataset(object):
         corresponding unpacked tuple and size is the size (in bytes) of the
         string of data that should be unpacked.
         """
-        fmt = '<' + ''.join([fmt for name, fmt, dtype in struct_list])
+        fmt = "<" + "".join([fmt for name, fmt, dtype in struct_list])
         names = [name for name, _, _ in struct_list]
         size = struct.calcsize(fmt)
 
@@ -787,7 +801,7 @@ def _fill_nans(lists):
     lengths = np.array([len(i) for i in lists], dtype=np.float64)
 
     # find discontinuities
-    discontinuities, = np.nonzero(lengths[1:] - lengths[:-1])
+    (discontinuities,) = np.nonzero(lengths[1:] - lengths[:-1])
 
     # convert to a list of indexes into lists where
     # discontinuities exist - add 1 to discontinuities to count for
@@ -802,14 +816,18 @@ def _fill_nans(lists):
 
     def _padded_sub_array(lists, start, end, to_length):
         sub_array = np.array(lists[start:end])
-        fill_nans = np.nan + np.zeros((sub_array.shape[0], to_length - sub_array.shape[1]))
+        fill_nans = np.nan + np.zeros(
+            (sub_array.shape[0], to_length - sub_array.shape[1])
+        )
         return np.column_stack([sub_array, fill_nans])
 
     max_length = np.max(lengths)
-    array = np.vstack([
-        _padded_sub_array(lists, start, end, int(max_length))
-        for start, end in zip(starts, ends)
-    ])
+    array = np.vstack(
+        [
+            _padded_sub_array(lists, start, end, int(max_length))
+            for start, end in zip(starts, ends)
+        ]
+    )
 
     return array
 
@@ -832,12 +850,15 @@ def _interpolate_repeats(arr):
     # add one more point so final repeated values are interpolated assuming the
     # same relationship as the last pair of values
     if len(filled_index) > 1:
-        filled_index = np.append(filled_index, (2 * filled_index[-1]) - filled_index[-2])
-        filled_values = np.append(filled_values, (2 * filled_values[-1]) - filled_values[-2])
+        filled_index = np.append(
+            filled_index, (2 * filled_index[-1]) - filled_index[-2]
+        )
+        filled_values = np.append(
+            filled_values, (2 * filled_values[-1]) - filled_values[-2]
+        )
     else:
         filled_index = np.append(filled_index, (2 * filled_index[-1]))
         filled_values = np.append(filled_values, (2 * filled_values[-1]))
-
 
     return np.interp(np.arange(len(filled)), filled_index, filled_values)
 
