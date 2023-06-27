@@ -1,7 +1,8 @@
 import numpy as np
+import pandas as pd
 
 
-def read(filename):
+def read(filename, as_dataframe=False):
     """
     Reads in a DepthPic pick file and returns dict that contains the surface number,
     the speed of sound (m/s), draft, tide and a numpy array of depths in meters
@@ -29,29 +30,37 @@ def read(filename):
     data = {}
 
     units_factors = {
-        'feet': 0.3048,  # feet to meters
-        'meters': 1.0,  # meters to meters
-        'fathoms': 1.8288,  # fathoms to meters
+        "feet": 0.3048,  # feet to meters
+        "meters": 1.0,  # meters to meters
+        "fathoms": 1.8288,  # fathoms to meters
     }
 
     with open(filename) as f:
         f.readline()
-        data['surface_number'] = int(f.readline().strip('r\n'))
-        units = f.readline().strip('\r\n').lower()
+        data["surface_number"] = int(f.readline().strip("r\n"))
+        units = f.readline().strip("\r\n").lower()
         convert_to_meters = units_factors[units]
         # speed of sound, draft and tide are always in m/s
-        data['speed_of_sound'] = float(f.readline().strip('\r\n'))
-        data['draft'] = float(f.readline().strip('\r\n'))
-        data['tide'] = float(f.readline().strip('\r\n'))
-        data['flag'] = f.readline().strip('\r\n')
-        position_type = f.readline().strip('\r\n')
-        if position_type == '3':
+        data["speed_of_sound"] = float(f.readline().strip("\r\n"))
+        data["draft"] = float(f.readline().strip("\r\n"))
+        data["tide"] = float(f.readline().strip("\r\n"))
+        data["flag"] = f.readline().strip("\r\n")
+        position_type = f.readline().strip("\r\n")
+        if position_type == "3":
             cols = [1, 2]
         else:
             cols = [2, 3]
 
         depth, trace_number = np.genfromtxt(f, usecols=cols, unpack=True)
-        data['trace_number'] = trace_number.astype(np.int32)
-        data['depth'] = depth.astype(np.float32) * convert_to_meters
+        data["trace_number"] = trace_number.astype(np.int32)
+        data["depth"] = depth.astype(np.float32) * convert_to_meters
+
+    if as_dataframe:
+        return pd.DataFrame(
+            {
+                f"depth_surface_{data['surface_number']}": data["depth"],
+                "trace": data["trace_number"],
+            }
+        ).set_index("trace")
 
     return data

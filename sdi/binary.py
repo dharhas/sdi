@@ -5,10 +5,45 @@ from datetime import date, datetime
 from io import BytesIO
 
 import numpy as np
+import pandas as pd
 
 
-def read(filepath, separate=True, file_format="bin"):
+def read(filepath, as_dataframe=False, separate=True, file_format="bin"):
     dataset = Dataset(filepath)
+
+    if as_dataframe:
+        d = dataset.as_dict(separate=False, file_format=file_format)
+        df = (
+            pd.DataFrame(
+                {
+                    key: d[key]
+                    for key in d
+                    if key
+                    not in [
+                        "date",
+                        "filepath",
+                        "file_version",
+                        "survey_line_number",
+                        "intensity",
+                    ]
+                }
+            )
+            .rename(columns={"trace_num": "trace"})
+            .set_index("trace")
+            .assign(survey_line_number=d["survey_line_number"])
+            .assign(date=d["date"])
+        )
+        df["datetime"] = pd.to_datetime(
+            df["date"].astype(str)
+            + " "
+            + df["hour"].astype(str)
+            + ":"
+            + df["minute"].astype(str)
+            + ":"
+            + (df["second"] + df["microsecond"] * 1e-6).astype(str)
+        )
+        return df
+
     return dataset.as_dict(separate=separate, file_format=file_format)
 
 
